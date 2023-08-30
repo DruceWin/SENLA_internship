@@ -1,1 +1,1 @@
-# SENLA_intership
+# SENLA_internship
