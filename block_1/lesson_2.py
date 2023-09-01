@@ -1,3 +1,4 @@
+# https://www.kaggle.com/code/alexisbcook/analytic-functions
 # --------------- 1) How can you predict the demand for taxis? ---------------
 # Fill in the blank below
 avg_num_trips_query = """

@@ -1,4 +1,4 @@
-
+# https://www.kaggle.com/code/alexisbcook/joins-and-unions
 # -------------------- 1) How long does it take for questions to receive answers? --------------------
 # Your code here
 correct_query = """
