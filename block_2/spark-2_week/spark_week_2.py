@@ -81,15 +81,19 @@ def main():
         print("OK")
 
         word_df = get_word_df(rows_df)
+        print(f"Общее количество слов - {word_df.count()}")
+
         print("Начата обработка задачи 1...", end="")
         result_df_1 = get_df_task_1(word_df)
         folder = save_df_to_csv(result_df_1, "task_1")
         print(f"OK \nСохранено в {folder}")
+        print(f"Количество уникальных слов - {result_df_1.count()}")
         
         print("Начата обработка задачи 2...", end="")
         result_df_2 = get_df_task_2(word_df)
         folder = save_df_to_csv(result_df_2, "task_2")
         print(f"OK \nСохранено в {folder}")
+        print(f"Количество уникальных биграмм - {result_df_2.count()}")
     except Exception as ex:
         print(f"Произошла ошибка: {ex}")
     finally:
