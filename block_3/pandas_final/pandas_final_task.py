@@ -109,7 +109,8 @@ class DataFrameManager:
                 row['currency'],
                 row['current_exchange_rate'],
                 dm_currency
-            )
+            ),
+            axis=1
         )
 
         # Объединение с таблицей articles для получения product_group_name
