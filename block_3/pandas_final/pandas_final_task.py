@@ -191,10 +191,6 @@ class DataFrameManager:
         merged_df['offer'] = ((merged_df['customer_loyalty'] == 1) &
                               (merged_df['club_member_status'] == 'ACTIVE') &
                               (merged_df['fashion_news_frequency'] == 'Regularly')).astype(int)
-        #
-        # # Удаление дублирующейся колонки "offer", если она существует
-        # if 'offer' in loyalty_result_df.columns:
-        #     loyalty_result_df = loyalty_result_df.drop(columns=['offer'])
 
         # Переупорядочивание столбцов
         ordered_cols = self.get_ordered_name_col(loyalty_result_df, 'offer')
