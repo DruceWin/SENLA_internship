@@ -27,8 +27,8 @@ class DatesUsed:
         """Возвращает начальную дату рассматриваемого периода"""
         return date(self.year, self.month, 1)
 
-    def month_offset(self, month_dif: int) -> date:
-        """Менят исходные параметры года и месяца исходя требуемой разницы месяцов (month_dif)"""
+    def month_offset(self, month_dif: int) -> None:
+        """Меняет исходные параметры года и месяца исходя требуемой разницы месяцев (month_dif)"""
         months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
         self.year = self.year + (self.month + month_dif - 1) // 12
         self.month = months[(self.month - 1 + month_dif) % (12 if month_dif >= 0 else -12)]

@@ -72,7 +72,10 @@ class DataFrameManager:
             return price
         else:
             dict_exchange_rate = json.loads(current_exchange_rate.replace("'", '"'))
-            return price * dict_exchange_rate.get(dm_currency, 1.0)
+            for i in dict_exchange_rate:
+                if i.upper() == dm_currency:
+                    return price * dict_exchange_rate[i]
+            raise KeyError("Нет курса валюты в списке")
 
     @staticmethod
     def get_ordered_name_col(initial_df: pd.DataFrame, *additional_fields) -> list:
@@ -93,58 +96,62 @@ class DataFrameManager:
         if not finish_date:
             finish_date = self.base_period.part_date
 
+        # Фильтрация транзакций по указанным датам
         filtered_transactions_df = self.transactions_df[
             (pd.to_datetime(self.transactions_df['t_dat']) >= pd.to_datetime(start_date)) &
             (pd.to_datetime(self.transactions_df['t_dat']) <= pd.to_datetime(finish_date))
-            ]
+            ].copy()
 
+        # Добавление столбца "price" с пересчитанной стоимостью в указанной валюте
         filtered_transactions_df['price'] = filtered_transactions_df.apply(
             lambda row: self.price_by_currency(
                 row['price'],
                 row['currency'],
                 row['current_exchange_rate'],
                 dm_currency
-            ),
-            axis=1
+            )
         )
 
-        aggregated_transactions = filtered_transactions_df.merge(
-            self.articles_df['article_id', 'product_group_name'],
+        # Объединение с таблицей articles для получения product_group_name
+        merged_df = filtered_transactions_df.merge(
+            self.articles_df[['article_id', 'product_group_name']],
             on='article_id',
             how='left'
-        ).groupby(['customer_id', 'article_id']).agg({
-            'price': 'max',
-            't_dat': 'first'
-        }).reset_index()
-
-        most_exp_art_df = aggregated_transactions.loc[
-            aggregated_transactions.groupby('customer_id')['price'].idxmax()
-        ]
-
-        customer_group_data = filtered_transactions_df.groupby('customer_id').agg(
-            transaction_amount=('price', 'sum'),
-            most_exp_article_id=('article_id', 'first'),
-            number_of_articles=('article_id', 'count'),
-            number_of_product_groups=('product_group_name', pd.Series.nunique)
-        ).reset_index()
-
-        enriched_customer_data = customer_group_data.merge(
-            self.customers_df['customer_id', 'age'],
-            on='customer_id',
-            how='left'
         )
 
-        enriched_customer_data['customer_group_by_age'] = enriched_customer_data['age'].apply(
+        # Определение наиболее дорогой статьи для каждого customer_id
+        merged_df['rank'] = merged_df.groupby('customer_id')['price'].rank(method='first', ascending=False)
+        most_expensive_articles = merged_df[merged_df['rank'] == 1][['customer_id', 'article_id']].rename(
+            columns={'article_id': 'most_exp_article_id'}
+        )
+
+        # Группировка и агрегация данных
+        aggregated_df = merged_df.groupby('customer_id').agg(
+            transaction_amount=pd.NamedAgg(column='price', aggfunc='sum'),
+            number_of_articles=pd.NamedAgg(column='article_id', aggfunc='count'),
+            number_of_product_groups=pd.NamedAgg(column='product_group_name', aggfunc=pd.Series.nunique)
+        ).reset_index()
+
+        # Объединение с таблицей most_expensive_articles
+        result_df = aggregated_df.merge(most_expensive_articles, on='customer_id', how='left')
+
+        # Объединение с таблицей customers для получения возраста
+        result_df = result_df.merge(self.customers_df[['customer_id', 'age']], on='customer_id', how='left')
+
+        # Определение группы покупателей по возрасту
+        result_df['customer_group_by_age'] = result_df['age'].apply(
             lambda x: 'S' if x < 23 else ('R' if x > 59 else 'A')
         )
 
-        enriched_customer_data['part_date'] = finish_date
-        enriched_customer_data['dm_currency'] = dm_currency
+        # Добавление столбцов part_date и dm_currency
+        result_df['part_date'] = finish_date
+        result_df['dm_currency'] = dm_currency
 
-        result_df = enriched_customer_data[
-            'part_date', 'customer_id', 'customer_group_by_age', 'transaction_amount', 'dm_currency',
-            'most_exp_article_id', 'number_of_articles', 'number_of_product_groups'
-        ]
+        # Выбор и переупорядочивание столбцов
+        result_df = result_df[[
+            'part_date', 'customer_id', 'customer_group_by_age', 'transaction_amount',
+            'dm_currency', 'most_exp_article_id', 'number_of_articles', 'number_of_product_groups'
+        ]]
 
         return result_df
 
@@ -170,23 +177,30 @@ class DataFrameManager:
         return loyalty_df
 
     def get_offer_df(self, loyalty_result_df: pd.DataFrame) -> pd.DataFrame:
-        """Дополняет DataFrame характеристикой 'offer' возможного предложения супер акции для пользователя."""
-        enriched_offer_df = loyalty_result_df.merge(
-            self.customers_df['customer_id', 'club_member_status', 'fashion_news_frequency'],
+        """
+        Дополняет DataFrame характеристикой 'offer' возможного предложения супер акции для пользователя.
+        """
+        # Объединение с таблицей customers для получения club_member_status и fashion_news_frequency
+        merged_df = loyalty_result_df.merge(
+            self.customers_df[['customer_id', 'club_member_status', 'fashion_news_frequency']],
             on='customer_id',
             how='left'
         )
 
-        enriched_offer_df['offer'] = (
-                (enriched_offer_df['customer_loyalty'] == 1) &
-                (enriched_offer_df['club_member_status'] == 'ACTIVE') &
-                (enriched_offer_df['fashion_news_frequency'] == 'Regularly')
-        ).astype(int)
+        # Условие для создания колонки offer
+        merged_df['offer'] = ((merged_df['customer_loyalty'] == 1) &
+                              (merged_df['club_member_status'] == 'ACTIVE') &
+                              (merged_df['fashion_news_frequency'] == 'Regularly')).astype(int)
+        #
+        # # Удаление дублирующейся колонки "offer", если она существует
+        # if 'offer' in loyalty_result_df.columns:
+        #     loyalty_result_df = loyalty_result_df.drop(columns=['offer'])
 
-        return enriched_offer_df[
-            *loyalty_result_df.columns.tolist(),
-            'offer'
-        ]
+        # Переупорядочивание столбцов
+        ordered_cols = self.get_ordered_name_col(loyalty_result_df, 'offer')
+        result_df = merged_df[ordered_cols]
+
+        return result_df
 
     def get_most_freq_product_df(self, base_result_df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -196,28 +210,34 @@ class DataFrameManager:
         start_date = self.base_period.start_period
         finish_date = self.base_period.part_date
 
-        customer_product_group_df = (
-            self.transactions_df[
-                (pd.to_datetime(self.transactions_df['t_dat']) >= pd.to_datetime(start_date)) &
-                (pd.to_datetime(self.transactions_df['t_dat']) <= pd.to_datetime(finish_date))
-                ]
-            .merge(self.articles_df['article_id', 'product_group_name'], on='article_id', how='left')
-            .groupby(['customer_id', 'product_group_name']).size()
-            .reset_index(name='count')
+        # Фильтрация транзакций по дате
+        filtered_transactions_df = self.transactions_df[
+            (pd.to_datetime(self.transactions_df['t_dat']) >= pd.to_datetime(start_date)) &
+            (pd.to_datetime(self.transactions_df['t_dat']) <= pd.to_datetime(finish_date))
+            ]
+
+        # Объединение с таблицей articles для получения product_group_name
+        merged_df = filtered_transactions_df.merge(
+            self.articles_df[['article_id', 'product_group_name']],
+            on='article_id',
+            how='left'
         )
 
-        most_freq_product_df = (
-            customer_product_group_df.loc[customer_product_group_df.groupby('customer_id')['count'].idxmax()]
-            ['customer_id', 'product_group_name'].rename(
-                columns={'product_group_name': 'most_freq_product_group_name'})
-        )
+        # Группировка по customer_id и product_group_name с подсчетом количества
+        grouped_df = merged_df.groupby(['customer_id', 'product_group_name']).size().reset_index(name='count')
 
+        # Определение наиболее частой product_group_name для каждого customer_id
+        most_freq_product_df = grouped_df.loc[
+            grouped_df.groupby('customer_id')['count'].idxmax()
+        ][['customer_id', 'product_group_name']].rename(columns={'product_group_name': 'most_freq_product_group_name'})
+
+        # Объединение с base_result_df
         result_df = base_result_df.merge(most_freq_product_df, on='customer_id', how='left')
 
-        return result_df[
-            *base_result_df.columns.tolist(),
-            'most_freq_product_group_name'
-        ]
+        # Переупорядочивание столбцов
+        ordered_cols = self.get_ordered_name_col(base_result_df, 'most_freq_product_group_name')
+        result_df = result_df[ordered_cols]
+        return result_df
 
 
 def get_start_parameters(*args):
@@ -244,10 +264,7 @@ def checking_parameters(start_parameters: dict):
 def main():
     try:
         # start_parameters = get_start_parameters("part_date", "dm_currency", "loyalty_level")
-        start_parameters = dict()
-        start_parameters["part_date"] = "2018-09"
-        start_parameters["dm_currency"] = "USD"
-        start_parameters["loyalty_level"] = "1"
+        start_parameters = {'part_date': '2018-09', 'dm_currency': 'USD', 'loyalty_level': '1'}
         checking_parameters(start_parameters)
         period = DatesUsed(**DatesUsed.get_year_and_month(start_parameters["part_date"]))
         print(f"Выбранный период: {period.start_period} -- {period.part_date}")
